@@ -15,8 +15,8 @@ from pathlib import Path
 import cairo
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parents[2]
-OUTPUT = ROOT / "profile/airootfs/usr/share/plymouth/themes/02-zero-portal"
+ROOT = Path(__file__).resolve().parent
+OUTPUT = ROOT / "airootfs/usr/share/plymouth/themes/02-zero-portal"
 WIDTH = 1280
 CANVAS = (512, 448)
 
@@ -146,18 +146,13 @@ def main():
     points, stops, stroke = logo_style(master)
     generated += f"\nconst LOGO_INK = {json.dumps([points, stops])};"
     generated += f"\nconst LOGO_STROKE_WIDTH = {stroke};"
-    motion = ROOT / "profile/airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js"
+    motion = ROOT / "airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js"
     source = motion.read_text()
     begin, end = "// BEGIN GENERATED LOGO", "// END GENERATED LOGO"
     assert source.count(begin) == source.count(end) == 1
     before, rest = source.split(begin)
     _, after = rest.split(end)
     motion.write_text(before + begin + "\n" + generated + "\n" + end + after)
-    branding_svg = master_path.read_text().replace('width="680" height="620"',
-                                                 'width="96" height="88"', 1)
-    for relative in ("pixmaps/02os-logo.svg", "icons/hicolor/scalable/apps/02os-logo.svg",
-                     "icons/02-OS/scalable/apps/02os-logo.svg"):
-        (ROOT / "profile/airootfs/usr/share" / relative).write_text(branding_svg)
     assets = list(OUTPUT.glob("*.png"))
     print(f"Generated {len(assets)} PNG assets, {sum(path.stat().st_size for path in assets):,} bytes")
 

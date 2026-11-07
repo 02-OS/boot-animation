@@ -5,14 +5,11 @@ The picture stays recognizable under a dark veil, with a soft oval where the
 0 rests. That oval's center matches drawPortalFrame on a 16:9 frame. Pillow
 and numpy are needed only to regenerate this asset, not to build an ISO.
 """
+import argparse
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
-
-ROOT = Path(__file__).resolve().parents[2]
-WALLPAPER = ROOT / "profile/airootfs/usr/share/backgrounds/02os/desktop.jpg"
-OUTPUT = ROOT / "profile/airootfs/usr/share/backgrounds/02os/portal-halo.png"
 WIDTH = 1920
 HEIGHT = 1080
 # How much of the dark field covers the picture. The wallpaper stays visible.
@@ -36,7 +33,11 @@ def cover(path):
 
 
 def main():
-    picture = np.asarray(cover(WALLPAPER)).astype(np.float32) / 255
+    parser = argparse.ArgumentParser(description="Render the greeter field from a wallpaper.")
+    parser.add_argument("--wallpaper", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    picture = np.asarray(cover(args.wallpaper)).astype(np.float32) / 255
     y, x = np.mgrid[0:HEIGHT, 0:WIDTH]
     # The logo 0 is 264 units wide and 533 tall. The glow is that capsule,
     # enlarged, so the light sits on the same shape that just expanded.
@@ -67,9 +68,9 @@ def main():
     rgb = np.clip(rgb + cyan * light[..., None], 0, 1)
 
     image = Image.fromarray(np.rint(np.clip(rgb, 0, 1) * 255).astype(np.uint8), "RGB")
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    image.save(OUTPUT, format="PNG", optimize=True)
-    print(f"wrote {OUTPUT} {image.size[0]}x{image.size[1]}")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    image.save(args.output, format="PNG", optimize=True)
+    print(f"wrote {args.output} {image.size[0]}x{image.size[1]}")
 
 
 if __name__ == "__main__":
