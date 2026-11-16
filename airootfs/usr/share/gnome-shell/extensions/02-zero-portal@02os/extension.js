@@ -8,9 +8,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DURATION_SECONDS, drawPortalFrame} from './motion.js';
 
-const MARKER = '/run/02os-zero-portal/played';
-const RESULT = '/run/02os-zero-portal/result.json';
+const PRIMARY_RUNTIME_DIR = '/run/02os-zero-portal';
+const MARKER = `${PRIMARY_RUNTIME_DIR}/played`;
+const RESULT = `${PRIMARY_RUNTIME_DIR}/result.json`;
 const MAX_COVER_MILLISECONDS = 4200;
+const STARTUP_FALLBACK_MILLISECONDS = 250;
 const INPUT_EVENTS = new Set([
     Clutter.EventType.KEY_PRESS,
     Clutter.EventType.BUTTON_PRESS,
@@ -19,6 +21,70 @@ const INPUT_EVENTS = new Set([
 ]);
 
 export default class ZeroPortalExtension extends Extension {
+    _motionAllowed() {
+        const stSettings = St.Settings.get();
+        const reduced = stSettings?.reduced_motion ?? stSettings?.reducedMotion;
+        return Boolean(this._interfaceSettings?.get_boolean('enable-animations')) &&
+            (!St.ReducedMotion || reduced !== St.ReducedMotion.REDUCE);
+    }
+
+    _isStartingUp() {
+        const layoutManager = Main.layoutManager;
+        if (typeof layoutManager?.startingUp === 'boolean')
+            return layoutManager.startingUp;
+        if (typeof layoutManager?._startingUp === 'boolean')
+            return layoutManager._startingUp;
+        return null;
+    }
+
+    _fallbackRuntimeDir() {
+        const runtimeDir = GLib.get_user_runtime_dir();
+        return runtimeDir ? GLib.build_filenamev([runtimeDir, '02os-zero-portal']) : null;
+    }
+
+    _claimBootMarker() {
+        const candidates = [
+            {dir: PRIMARY_RUNTIME_DIR, createDir: false, label: 'first GDM load this boot'},
+        ];
+        const fallbackDir = this._fallbackRuntimeDir();
+        if (fallbackDir && fallbackDir !== PRIMARY_RUNTIME_DIR) {
+            candidates.push({
+                dir: fallbackDir,
+                createDir: true,
+                label: 'first GDM load this boot (runtime fallback)',
+            });
+        }
+
+        let lastError = null;
+        for (const {dir, createDir, label} of candidates) {
+            const markerPath = GLib.build_filenamev([dir, 'played']);
+            const resultPath = GLib.build_filenamev([dir, 'result.json']);
+            if (createDir)
+                GLib.mkdir_with_parents(dir, 0o700);
+            try {
+                const stream = Gio.File.new_for_path(markerPath).create(
+                    Gio.FileCreateFlags.NONE, null);
+                stream.close(null);
+                this._markerPath = markerPath;
+                this._resultPath = resultPath;
+                this._record('claimed', label);
+                return true;
+            } catch (error) {
+                if (error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS)) {
+                    this._resultPath = resultPath;
+                    console.info('02 Zero Portal: skipped (already played this boot).');
+                    this._restoreDiagnosticEvents();
+                    this._record('skipped', 'already played this boot');
+                    return false;
+                }
+                lastError = error;
+            }
+        }
+        console.warn(`02 Zero Portal skipped: ${lastError?.message ?? 'marker unavailable'}`);
+        this._record('skipped', `marker unavailable: ${lastError?.message ?? 'marker unavailable'}`);
+        return false;
+    }
+
     enable() {
         this._areas = [];
         this._connections = [];
@@ -27,33 +93,27 @@ export default class ZeroPortalExtension extends Extension {
         this._completedId = 0;
         this._deadlineId = 0;
         this._errorIdleId = 0;
+        this._startupFallbackId = 0;
         this._startedAt = 0;
         this._phase = '';
         this._interfaceSettings = null;
+        this._markerPath = MARKER;
+        this._resultPath = RESULT;
         this._diagnosticEvents = [];
         this._diagnosticWriteWarned = false;
         this._finishing = false;
 
         if (Main.sessionMode.currentMode !== 'gdm')
             return;
-        // O_EXCL creation is atomic across greeter processes. /run is cleared
-        // at reboot; logging out or restarting GDM can never replay the intro.
-        try {
-            const stream = Gio.File.new_for_path(MARKER).create(
-                Gio.FileCreateFlags.NONE, null);
-            stream.close(null);
-        } catch (error) {
-            if (error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS)) {
-                console.info('02 Zero Portal: skipped (already played this boot).');
-                this._restoreDiagnosticEvents();
-                this._record('skipped', 'already played this boot');
-            } else {
-                console.warn(`02 Zero Portal skipped: ${error.message}`);
-                this._record('skipped', `marker unavailable: ${error.message}`);
-            }
+
+        const monitors = (Main.layoutManager.monitors ?? []).filter(
+            monitor => monitor && monitor.width > 0 && monitor.height > 0);
+        if (!monitors.length) {
+            console.info('02 Zero Portal: skipped (no monitors available).');
+            this._record('skipped', 'no monitors available');
             return;
         }
-        this._record('claimed', 'first GDM load this boot');
+
         this._interfaceSettings = new Gio.Settings({
             schema_id: 'org.gnome.desktop.interface',
         });
@@ -62,12 +122,17 @@ export default class ZeroPortalExtension extends Extension {
         // signal. That first autoload still belongs to this boot: begin the
         // reveal immediately when login is ready, otherwise wait for it. Input
         // always removes this nonreactive overlay and continues to normal GDM.
-        // St.Settings also automatically inhibits animations on software
-        // renderers. This bounded Cairo effect honours the user's reduced
-        // motion preference directly and can run in a software-rendered VM.
-        if (!this._interfaceSettings.get_boolean('enable-animations')) {
+        if (!this._motionAllowed()) {
             console.info('02 Zero Portal: skipped (reduced motion).');
             this._record('skipped', 'reduced motion');
+            this._interfaceSettings = null;
+            return;
+        }
+
+        // O_EXCL creation is atomic across greeter processes. /run is cleared
+        // at reboot; logging out or restarting GDM can never replay the intro.
+        if (!this._claimBootMarker()) {
+            this._interfaceSettings = null;
             return;
         }
 
@@ -82,14 +147,21 @@ export default class ZeroPortalExtension extends Extension {
                     this._finish('session changed');
             });
             this._connect(this._interfaceSettings, 'changed::enable-animations', () => {
-                if (!this._interfaceSettings.get_boolean('enable-animations'))
+                if (!this._motionAllowed())
                     this._finish('reduced motion');
             });
+            const stSettings = St.Settings.get();
+            if (St.ReducedMotion && stSettings) {
+                this._connect(stSettings, 'notify::reduced-motion', () => {
+                    if (!this._motionAllowed())
+                        this._finish('reduced motion');
+                });
+            }
             // Resizing or unplugging a screen immediately reveals login rather
             // than leaving a partial full-screen mask on another monitor.
             this._connect(Main.layoutManager, 'monitors-changed', () => this._finish('monitor changed'));
             this._connect(Main.layoutManager, 'startup-complete', () => this._beginMotion());
-            for (const monitor of Main.layoutManager.monitors) {
+            for (const monitor of monitors) {
                 const area = new St.DrawingArea({
                     name: '02-zero-portal',
                     reactive: false,
@@ -99,10 +171,14 @@ export default class ZeroPortalExtension extends Extension {
                     width: monitor.width,
                     height: monitor.height,
                 });
-                area.connect('repaint', () => this._repaint(area));
+                this._connect(area, 'repaint', () => this._repaint(area));
                 this._areas.push(area);
                 Main.layoutManager.addTopChrome(area);
                 area.queue_repaint();
+            }
+            if (!this._areas.length) {
+                this._finish('no monitors available');
+                return;
             }
             this._deadlineId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
                 MAX_COVER_MILLISECONDS, () => {
@@ -110,11 +186,22 @@ export default class ZeroPortalExtension extends Extension {
                     this._finish('deadline');
                     return GLib.SOURCE_REMOVE;
                 });
+            const startingUp = this._isStartingUp();
             console.info('02 Zero Portal: retained logo ready; waiting for real login.');
-            this._record('overlay ready', Main.layoutManager._startingUp ?
-                'waiting for login startup' : 'login startup already complete');
-            if (!Main.layoutManager._startingUp)
+            this._record('overlay ready', startingUp === false ?
+                'login startup already complete' : 'waiting for login startup');
+            if (startingUp === false) {
                 this._beginMotion();
+            } else if (startingUp === null) {
+                this._startupFallbackId = GLib.timeout_add(
+                    GLib.PRIORITY_DEFAULT,
+                    STARTUP_FALLBACK_MILLISECONDS,
+                    () => {
+                        this._startupFallbackId = 0;
+                        this._beginMotion();
+                        return GLib.SOURCE_REMOVE;
+                    });
+            }
         } catch (error) {
             console.warn(`02 Zero Portal stopped: ${error.message}`);
             this._record('error', error.message);
@@ -132,7 +219,7 @@ export default class ZeroPortalExtension extends Extension {
 
     _restoreDiagnosticEvents() {
         try {
-            const [, contents] = Gio.File.new_for_path(RESULT).load_contents(null);
+            const [, contents] = Gio.File.new_for_path(this._resultPath).load_contents(null);
             const record = JSON.parse(new TextDecoder().decode(contents));
             if (record.version === 1 && Array.isArray(record.events))
                 this._diagnosticEvents = record.events.slice(-15);
@@ -156,7 +243,7 @@ export default class ZeroPortalExtension extends Extension {
                 reason,
                 events: this._diagnosticEvents,
             }, null, 2) + '\n');
-            Gio.File.new_for_path(RESULT).replace_contents(contents, null, false,
+            Gio.File.new_for_path(this._resultPath).replace_contents(contents, null, false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION, null);
         } catch (error) {
             // This file is optional evidence in a boot-scoped tmpfs. A write
@@ -169,6 +256,10 @@ export default class ZeroPortalExtension extends Extension {
     }
 
     _beginMotion() {
+        if (this._startupFallbackId) {
+            GLib.source_remove(this._startupFallbackId);
+            this._startupFallbackId = 0;
+        }
         if (!this._areas.length || this._startedAt)
             return;
         this._startedAt = GLib.get_monotonic_time();
@@ -253,14 +344,19 @@ export default class ZeroPortalExtension extends Extension {
         }
         this._newFrameId = 0;
         this._completedId = 0;
-        for (const key of ['_deadlineId', '_errorIdleId']) {
+        for (const key of ['_deadlineId', '_errorIdleId', '_startupFallbackId']) {
             if (this[key]) {
                 GLib.source_remove(this[key]);
                 this[key] = 0;
             }
         }
-        for (const [object, id] of this._connections ?? [])
-            object.disconnect(id);
+        for (const [object, id] of this._connections ?? []) {
+            try {
+                object.disconnect(id);
+            } catch {
+                // Ignore already-disposed objects during shutdown teardown.
+            }
+        }
         this._connections = [];
         for (const area of this._areas ?? []) {
             Main.layoutManager.removeChrome(area);

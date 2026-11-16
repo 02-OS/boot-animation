@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install native and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc \
+            libcairo2-dev \
+            libplymouth5 \
+            pkg-config \
+            plymouth \
+            python3 \
+            python3-cairo \
+            python3-numpy \
+            python3-pil
+
+      - name: Lint JSON, shell script, CSS, and extension JavaScript
+        run: |
+          python3 -m json.tool portal-spec.json >/dev/null
+          python3 -m json.tool airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/metadata.json >/dev/null
+          bash -n install-into.sh
+          node --check airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/extension.js
+          node --check airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js
+          python3 - <<'EOF'
+          from pathlib import Path
+          css = Path("airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/stylesheet.css").read_text()
+          assert css.count("{") == css.count("}") > 0, "Unbalanced braces in stylesheet.css"
+          assert "inset 0 0 0 2px rgba(0, 186, 243, 0.85)" in css
+          EOF
+
+      - name: Check generate_assets.py determinism and clean repo state
+        run: |
+          python3 generate_assets.py
+          git diff --exit-code -- \
+            airootfs/usr/share/plymouth/themes/02-zero-portal/logo.png \
+            airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js
+          sha1=$(sha256sum airootfs/usr/share/plymouth/themes/02-zero-portal/logo.png airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js)
+          python3 generate_assets.py
+          sha2=$(sha256sum airootfs/usr/share/plymouth/themes/02-zero-portal/logo.png airootfs/usr/share/gnome-shell/extensions/02-zero-portal@02os/motion.js)
+          test "$sha1" = "$sha2"
+
+      - name: Check render_lock_field.py determinism and portal-halo.png footprint
+        run: |
+          python3 - <<'EOF'
+          from pathlib import Path
+          from PIL import Image
+          halo = Path("airootfs/usr/share/backgrounds/02os/portal-halo.png")
+          size = halo.stat().st_size
+          assert size < 400_000, f"portal-halo.png too large: {size}"
+          with Image.open(halo) as img:
+              assert img.size == (1920, 1080), img.size
+          EOF
+          python3 - <<'EOF'
+          import numpy as np
+          from PIL import Image
+          x = np.linspace(0, 255, 640, dtype=np.uint8)[None, :]
+          y = np.linspace(0, 255, 360, dtype=np.uint8)[:, None]
+          rgb = np.stack([np.broadcast_to(x, (360, 640)), np.broadcast_to(y, (360, 640)), np.full((360, 640), 96, dtype=np.uint8)], axis=-1)
+          Image.fromarray(rgb, "RGB").save("${{ runner.temp }}/wallpaper.png")
+          EOF
+          python3 render_lock_field.py --wallpaper "${{ runner.temp }}/wallpaper.png" --output "${{ runner.temp }}/halo-1.png"
+          python3 render_lock_field.py --wallpaper "${{ runner.temp }}/wallpaper.png" --output "${{ runner.temp }}/halo-2.png"
+          cmp "${{ runner.temp }}/halo-1.png" "${{ runner.temp }}/halo-2.png"
+          python3 render_lock_field.py --wallpaper "${{ runner.temp }}/wallpaper.png" --width 800 --height 600 --output "${{ runner.temp }}/halo-800.png"
+          python3 - <<'EOF'
+          from PIL import Image
+          with Image.open("${{ runner.temp }}/halo-800.png") as img:
+              assert img.size == (800, 600), img.size
+          EOF
+
+      - name: Compile and run native Plymouth probe (check_native.c)
+        run: |
+          PLY_VER=$(dpkg-query -W -f='${Version}' plymouth | sed 's/-.*//')
+          git clone --depth 1 --branch "$PLY_VER" https://gitlab.freedesktop.org/plymouth/plymouth.git "${{ runner.temp }}/plymouth-src"
+          gcc -O2 -Wall -Wextra -Werror check_native.c -o "${{ runner.temp }}/check_native" \
+            -I"${{ runner.temp }}/plymouth-src/src/plugins/splash/script" \
+            -I"${{ runner.temp }}/plymouth-src/src/libply" \
+            -I"${{ runner.temp }}/plymouth-src/src/libply-splash-core" \
+            -I"${{ runner.temp }}/plymouth-src/src/libply-splash-graphics" \
+            /usr/lib/x86_64-linux-gnu/plymouth/script.so \
+            -l:libply.so.5 -l:libply-splash-core.so.5 -l:libply-splash-graphics.so.5 \
+            $(pkg-config --cflags --libs cairo) -lm
+          "${{ runner.temp }}/check_native" airootfs/usr/share/plymouth/themes/02-zero-portal 0
+          "${{ runner.temp }}/check_native" airootfs/usr/share/plymouth/themes/02-zero-portal 1
+          "${{ runner.temp }}/check_native" airootfs/usr/share/plymouth/themes/02-zero-portal 0 --output-dir "${{ runner.temp }}/native-out"
+          test -f "${{ runner.temp }}/native-out/02os-native-zero-portal-fade.png"
+          test -f "${{ runner.temp }}/native-out/02os-native-zero-portal-800x600.png"

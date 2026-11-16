@@ -2,10 +2,12 @@ import Cairo from 'cairo';
 
 // This is the approved scripts/boot-animation/02-logo.svg geometry. The first
 // frame matches Plymouth's retained logo, including its short-display fit.
+// Generated from 02-logo.svg and portal-spec.json by generate_assets.py.
+// BEGIN GENERATED LOGO
 export const DURATION_SECONDS = 2.6;
 const WHITE = [249 / 255, 249 / 255, 247 / 255];
-// Generated from the SVG master by generate_assets.py.
-// BEGIN GENERATED LOGO
+const PORTAL_ORIGIN_X = -170.0;
+const PORTAL_ORIGIN_Y = -4.0;
 const ZERO = [["M", 0.6484, -266.1914], ["C", -73.6602, -266.1914, -131.3516, -210.0391, -131.3516, -134.6328], ["L", -131.3516, 146.5156], ["C", -131.3516, 210.2656, -82.8047, 258.7734, -18.8984, 258.7734], ["L", 20.1914, 258.7734], ["C", 84.0977, 258.7734, 132.6484, 210.2656, 132.6484, 146.5156], ["L", 132.6484, -134.6328], ["C", 132.6484, -210.0391, 74.957, -266.1914, 0.6484, -266.1914], ["Z"]];
 const TWO = [["M", -4.1094, -133.4727], ["C", -5.3008, -217.668, 66.3789, -283.5312, 156.9609, -282.4844], ["C", 250.2383, -285.3164, 320.3008, -217.1797, 318.5039, -129.3789], ["C", 319.4336, -81.7344, 303.0703, -45.2812, 270.8047, -12.5312], ["L", 41.5312, 227.3477], ["C", 36.0586, 233.0938, 36.3555, 238.1719, 42.418, 242.5781], ["L", 300.0469, 242.668], ["C", 309.043, 242.668, 316.332, 249.6055, 316.332, 258.1602], ["C", 316.332, 267.043, 309.0977, 274.2461, 300.1719, 274.2461], ["L", -150.0, 274.1406], ["L", -149.9492, 242.2344], ["L", -79.5664, 247.4297], ["C", -40.3242, 253.918, -7.6016, 235.0078, 10.793, 213.125], ["L", 248.375, -34.8867], ["C", 273.8555, -60.418, 287.4141, -90.7891, 286.7188, -129.6445], ["C", 288.8711, -198.5, 232.4844, -253.4727, 157.1836, -250.4609], ["C", 83.8594, -250.9688, 25.7344, -199.2812, 27.1172, -132.7148], ["C", 27.1172, -124.0898, 20.125, -117.1016, 11.5039, -117.1016], ["C", 2.8789, -117.1016, -4.1094, -124.0898, -4.1094, -133.4727], ["Z"]];
 const TWO_FILLED = true;
@@ -55,11 +57,11 @@ function drawTwo(cr, slide) {
     cr.save();
     // Only the area to the right of the 0 is visible. The 2 moves behind that
     // silhouette rather than fading or reappearing from its left side.
-    cr.rectangle(-170, -2000, 10170, 4000);
+    cr.rectangle(PORTAL_ORIGIN_X, -2000, 10000 - PORTAL_ORIGIN_X, 4000);
     cr.clip();
     cr.rectangle(-10000, -10000, 20000, 20000);
     cr.save();
-    cr.translate(-170, 0);
+    cr.translate(PORTAL_ORIGIN_X, 0);
     zeroPath(cr);
     cr.restore();
     cr.setFillRule(Cairo.FillRule.EVEN_ODD);
@@ -89,8 +91,8 @@ export function drawPortalFrame(cr, width, height, elapsed) {
         height * 0.66 * 512 / 448)));
     const scale = canvasWidth * 0.59375 / 680;
     // The 0 stays at its place in the logo and keeps its tall oval.
-    const originX = -170;
-    const originY = -4;
+    const originX = PORTAL_ORIGIN_X;
+    const originY = PORTAL_ORIGIN_Y;
     const x = originX * scale + width / 2;
     const y = height / 2 + originY * scale;
     const halfWidth = 132;

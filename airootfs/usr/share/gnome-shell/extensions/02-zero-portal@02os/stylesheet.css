@@ -43,15 +43,20 @@
 .login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:selected:hover,
 .login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:focus:hover {
     color: #f7f7f5;
-    background-color: #000000;
-    box-shadow: none !important;
+    background-color: rgba(0, 186, 243, 0.12) !important;
+    box-shadow: inset 0 0 0 2px rgba(0, 186, 243, 0.85) !important;
 }
 
 .login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:active,
-.login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:active:hover,
-.login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:active:focus {
-    background-color: #000000;
+.login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:active:hover {
+    background-color: rgba(0, 186, 243, 0.18) !important;
     color: #f7f7f5;
+}
+
+.login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item:active:focus {
+    background-color: rgba(0, 186, 243, 0.18) !important;
+    color: #f7f7f5;
+    box-shadow: inset 0 0 0 2px rgba(0, 186, 243, 0.85) !important;
 }
 
 .login-dialog-user-list-view .login-dialog-user-list .login-dialog-user-list-item .user-icon {
@@ -105,10 +110,11 @@
     color: #f7f7f5;
 }
 
-.login-dialog .login-dialog-prompt-entry:focus {
-    background-color: #000000;
+.login-dialog .login-dialog-prompt-entry:focus,
+.login-dialog .login-dialog-prompt-entry:focus:hover {
+    background-color: rgba(0, 186, 243, 0.12) !important;
     color: #f7f7f5;
-    box-shadow: none !important;
+    box-shadow: inset 0 0 0 2px rgba(0, 186, 243, 0.85) !important;
 }
 
 .login-dialog .login-dialog-button.cancel-button,
