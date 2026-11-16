@@ -22,7 +22,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc \
             libcairo2-dev \
+            libplymouth-dev \
             libplymouth5 \
+            libxkbcommon-dev \
             pkg-config \
             plymouth \
             python3 \
