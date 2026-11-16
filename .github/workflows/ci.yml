@@ -86,13 +86,8 @@ jobs:
 
       - name: Compile and run native Plymouth probe (check_native.c)
         run: |
-          PLY_VER=$(dpkg-query -W -f='${Version}' plymouth | sed 's/-.*//')
-          git clone --depth 1 --branch "$PLY_VER" https://gitlab.freedesktop.org/plymouth/plymouth.git "${{ runner.temp }}/plymouth-src"
           gcc -O2 -Wall -Wextra -Werror check_native.c -o "${{ runner.temp }}/check_native" \
-            -I"${{ runner.temp }}/plymouth-src/src/plugins/splash/script" \
-            -I"${{ runner.temp }}/plymouth-src/src/libply" \
-            -I"${{ runner.temp }}/plymouth-src/src/libply-splash-core" \
-            -I"${{ runner.temp }}/plymouth-src/src/libply-splash-graphics" \
+            -Iinclude/plymouth-script \
             /usr/lib/x86_64-linux-gnu/plymouth/script.so \
             -l:libply.so.5 -l:libply-splash-core.so.5 -l:libply-splash-graphics.so.5 \
             $(pkg-config --cflags --libs cairo) -lm
