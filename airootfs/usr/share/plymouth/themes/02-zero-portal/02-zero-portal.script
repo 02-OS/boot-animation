@@ -1,6 +1,7 @@
 # Native logo stage for Zero Portal; the live reveal runs in the GDM compositor.
 # duration in the progress callback is Plymouth's real elapsed boot time.
-# Refresh ticks never advance this timeline, so slow rendering cannot stretch it.
+# When boot_progress has not yet advanced (early initramfs / LUKS waits),
+# global.tick_count provides a bounded 60 Hz fallback clock.
 Window.SetBackgroundTopColor(249 / 255, 249 / 255, 247 / 255);
 Window.SetBackgroundBottomColor(249 / 255, 249 / 255, 247 / 255);
 Plymouth.SetRefreshRate(60);
@@ -8,10 +9,16 @@ Plymouth.SetRefreshRate(60);
 global.intro_duration = 0.25;
 global.epoch = -1;
 global.elapsed = 0;
+global.tick_count = 0;
+global.ready = 0;
+global.in_layout = 0;
+global.in_boot_progress = 0;
 global.boot_mode = Plymouth.GetMode() == "boot";
 global.finished = !global.boot_mode;
 global.prompt_active = 0;
 global.last_frame = -2;
+global.raw_screen_width = 0;
+global.raw_screen_height = 0;
 global.screen_width = 0;
 global.screen_height = 0;
 global.message_text = "";
@@ -57,23 +64,6 @@ fun place_text(sprite, text, y)
     sprite.SetOpacity(1);
 }
 
-fun layout()
-{
-    global.screen_width = Math.Max(64, Window.GetWidth());
-    global.screen_height = Math.Max(64, Window.GetHeight());
-    # Match the approved preview on a wide screen; fit shorter displays too.
-    global.canvas_width = Math.Int(Math.Min(global.screen_width * 0.4,
-                                            global.screen_height * 0.66 * 512 / 448));
-    global.canvas_width = Math.Max(1, global.canvas_width);
-    global.canvas_height = Math.Max(1, Math.Int(global.canvas_width * 448 / 512));
-    global.center_x = Window.GetX() + global.screen_width / 2;
-    global.center_y = Window.GetY() + global.screen_height / 2;
-    global.last_frame = -2;
-        place_text(prompt_sprite, global.prompt_text, global.screen_height * 0.77);
-    place_text(entry_sprite, global.entry_text, global.screen_height * 0.77 + 34);
-    place_text(message_sprite, global.message_text, global.screen_height - 56);
-}
-
 fun show_logo()
 {
     if (global.last_frame != -1)
@@ -88,13 +78,46 @@ fun show_logo()
 
 fun refresh()
 {
-    if (Window.GetWidth() != global.screen_width || Window.GetHeight() != global.screen_height)
+    if (!global.in_layout && (Window.GetWidth() != global.raw_screen_width || Window.GetHeight() != global.raw_screen_height))
         layout();
     show_logo();
     if (global.finished || global.prompt_active || !global.boot_mode)
+    {
         logo_sprite.SetOpacity(1);
-    else
-        logo_sprite.SetOpacity(smooth(global.elapsed / global.intro_duration));
+        return;
+    }
+    if (global.ready && !global.in_layout && !global.in_boot_progress && global.elapsed <= 0)
+        global.tick_count += 1;
+    fade_elapsed = Math.Max(global.elapsed, global.tick_count / 60.0);
+    if (fade_elapsed >= global.intro_duration && global.tick_count > 0 && global.elapsed <= 0)
+        global.finished = 1;
+    logo_sprite.SetOpacity(smooth(fade_elapsed / global.intro_duration));
+}
+
+fun layout()
+{
+    global.raw_screen_width = Window.GetWidth();
+    global.raw_screen_height = Window.GetHeight();
+    global.screen_width = Math.Max(64, global.raw_screen_width);
+    global.screen_height = Math.Max(64, global.raw_screen_height);
+    # Match the approved preview on a wide screen; fit shorter displays too.
+    global.canvas_width = Math.Int(Math.Min(global.screen_width * 0.4,
+                                            global.screen_height * 0.66 * 512 / 448));
+    global.canvas_width = Math.Max(1, global.canvas_width);
+    global.canvas_height = Math.Max(1, Math.Int(global.canvas_width * 448 / 512));
+    global.center_x = Window.GetX() + global.screen_width / 2;
+    global.center_y = Window.GetY() + global.screen_height / 2;
+    global.last_frame = -2;
+    show_logo();
+    place_text(prompt_sprite, global.prompt_text, global.screen_height * 0.77);
+    place_text(entry_sprite, global.entry_text, global.screen_height * 0.77 + 34);
+    place_text(message_sprite, global.message_text, global.screen_height - 56);
+    if (!global.in_layout)
+    {
+        global.in_layout = 1;
+        refresh();
+        global.in_layout = 0;
+    }
 }
 
 fun boot_progress(duration, progress)
@@ -106,7 +129,9 @@ fun boot_progress(duration, progress)
     global.elapsed = Math.Max(global.elapsed, duration - global.epoch);
     if (global.elapsed >= global.intro_duration)
         global.finished = 1;
+    global.in_boot_progress = 1;
     refresh();
+    global.in_boot_progress = 0;
 }
 
 fun display_normal()
@@ -191,3 +216,4 @@ Plymouth.SetQuitFunction(quit);
 Plymouth.SetDisplayHotplugFunction(layout);
 layout();
 refresh();
+global.ready = 1;
